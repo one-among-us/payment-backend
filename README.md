@@ -1,0 +1,59 @@
+# One Among Us payment backend
+
+Small Node.js service behind `donate.oau.app`. It validates donation requests,
+creates one-time Stripe Checkout Sessions, and validates Stripe webhooks. Card
+details never pass through this service.
+
+## Configure
+
+1. Copy `.env.example` to `.env` and replace every secret.
+2. Create a Cloudflare Turnstile widget for `www.oneamongus.ca` and
+   `oneamongus.ca` with action `donate`.
+3. In Stripe Workbench, add an event destination pointing to
+   `https://donate.oau.app/webhooks/stripe`. Subscribe to
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   and `checkout.session.async_payment_failed`, then put its signing secret in
+   `STRIPE_WEBHOOK_SECRET`.
+4. Keep Stripe in test mode until the complete flow and webhook signature
+   validation have been tested.
+5. Build the VitePress frontend with its public Turnstile site key set as
+   `VITE_TURNSTILE_SITE_KEY`. This differs from the secret key stored here.
+
+The values in `DONATION_AMOUNTS_CAD` are Canadian dollars. The browser submits
+the corresponding integer number of cents; the server rejects all amounts not
+in this allowlist.
+
+## Run
+
+```sh
+docker compose up -d --build
+curl --fail http://127.0.0.1:3000/healthz
+```
+
+Place an HTTPS reverse proxy in front of `127.0.0.1:3000`. Preserve the original
+`Origin` header and set `X-Forwarded-For`; only set `TRUST_PROXY=true` when the
+service is unreachable except through that trusted proxy.
+
+Example nginx location:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+}
+```
+
+For more than one backend process, replace the in-memory IP limiter with a
+shared limiter such as Redis or enforce the same limits at the reverse proxy.
+
+## Endpoints
+
+- `POST /session`: validates a form submission and redirects with HTTP 303 to a
+  new Stripe Checkout Session.
+- `POST /webhooks/stripe`: validates and receives Stripe webhook events.
+- `GET /healthz`: health check.
+
+Never commit `.env`, expose `STRIPE_SECRET_KEY`, or accept arbitrary prices from
+the browser.
