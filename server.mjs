@@ -1,6 +1,13 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 
+const parseCadToCents = (value) => {
+  const match = String(value).match(/^(0|[1-9]\d{0,3})(?:\.(\d{1,2}))?$/);
+  if (!match) return null;
+  const cents = Number(match[1]) * 100 + Number((match[2] || '').padEnd(2, '0'));
+  return Number.isSafeInteger(cents) ? cents : null;
+};
+
 const requiredEnv = [
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
@@ -29,12 +36,8 @@ const config = {
       .map((origin) => origin.trim())
       .filter(Boolean),
   ),
-  allowedAmounts: new Set(
-    (process.env.DONATION_AMOUNTS_CAD || '10,25,50,100,250')
-      .split(',')
-      .map((amount) => Math.round(Number(amount) * 100))
-      .filter((amount) => Number.isSafeInteger(amount) && amount > 0),
-  ),
+  minimumAmount: parseCadToCents(process.env.DONATION_MIN_CAD || '5'),
+  maximumAmount: parseCadToCents(process.env.DONATION_MAX_CAD || '2000'),
   successUrls: {
     en: process.env.SUCCESS_URL || 'https://www.oneamongus.ca/donate/success',
     'zh-Hans': process.env.ZH_HANS_SUCCESS_URL || 'https://www.oneamongus.ca/zh-Hans/donate/success',
@@ -48,6 +51,10 @@ const config = {
 
 if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
   throw new Error('PORT must be a valid TCP port');
+}
+if (config.minimumAmount === null || config.maximumAmount === null ||
+    config.minimumAmount > config.maximumAmount) {
+  throw new Error('DONATION_MIN_CAD and DONATION_MAX_CAD must define a valid range');
 }
 
 const rateLimits = new Map();
@@ -205,12 +212,14 @@ const handleSession = async (request, response) => {
   if (!consumeRateLimit(ip)) return send(response, 429, 'Too many donation attempts. Please try later.');
 
   const body = parseForm(request, await readBody(request));
-  const amount = Number(body.amount);
+  const amount = parseCadToCents(body.amount);
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   const locale = body.locale === 'zh-Hans' ? 'zh-Hans' : 'en';
   const token = body['cf-turnstile-response'] || body.turnstileToken;
 
-  if (!config.allowedAmounts.has(amount)) return send(response, 400, 'Invalid donation amount.');
+  if (amount === null || amount < config.minimumAmount || amount > config.maximumAmount) {
+    return send(response, 400, 'Invalid donation amount.');
+  }
   if (email && (!/^\S+@\S+\.\S+$/.test(email) || email.length > 254)) {
     return send(response, 400, 'Invalid email address.');
   }

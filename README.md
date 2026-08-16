@@ -19,9 +19,9 @@ details never pass through this service.
 5. Build the VitePress frontend with its public Turnstile site key set as
    `VITE_TURNSTILE_SITE_KEY`. This differs from the secret key stored here.
 
-The values in `DONATION_AMOUNTS_CAD` are Canadian dollars. The browser submits
-the corresponding integer number of cents; the server rejects all amounts not
-in this allowlist.
+`DONATION_MIN_CAD` and `DONATION_MAX_CAD` define the accepted range in Canadian
+dollars. The browser submits a decimal CAD amount; the server parses it into
+integer cents and rejects malformed values or amounts outside this range.
 
 ## Run
 
