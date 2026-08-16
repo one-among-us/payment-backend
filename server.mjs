@@ -10,7 +10,6 @@ const parseCadToCents = (value) => {
 
 const requiredEnv = [
   'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
   'TURNSTILE_SECRET_KEY',
 ];
 
@@ -146,6 +145,7 @@ const verifyTurnstile = async (token, ip) => {
 const createCheckoutSession = async ({ amount, email, locale }) => {
   const params = new URLSearchParams({
     mode: 'payment',
+    'payment_method_types[0]': 'card',
     success_url: `${config.successUrls[locale]}?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: config.cancelUrls[locale],
     billing_address_collection: 'required',
@@ -185,7 +185,7 @@ const secureEqual = (left, right) => {
 };
 
 const verifyStripeSignature = (body, signatureHeader) => {
-  if (typeof signatureHeader !== 'string') return false;
+  if (!config.stripeWebhookSecret || typeof signatureHeader !== 'string') return false;
   const parts = signatureHeader.split(',').map((part) => part.split('='));
   const timestamp = parts.find(([key]) => key === 't')?.[1];
   const signatures = parts.filter(([key]) => key === 'v1').map(([, value]) => value);
@@ -209,7 +209,9 @@ const handleSession = async (request, response) => {
   }
 
   const ip = clientIp(request);
-  if (!consumeRateLimit(ip)) return send(response, 429, 'Too many donation attempts. Please try later.');
+  if (!consumeRateLimit(`session:${ip}`)) {
+    return send(response, 429, 'Too many donation attempts. Please try later.');
+  }
 
   const body = parseForm(request, await readBody(request));
   const amount = parseCadToCents(body.amount);
@@ -232,6 +234,58 @@ const handleSession = async (request, response) => {
     'Referrer-Policy': 'no-referrer',
   });
   response.end();
+};
+
+const handleSessionStatus = async (request, response, url) => {
+  const origin = request.headers.origin;
+  if (!origin || !config.allowedOrigins.has(origin)) {
+    return send(response, 403, 'Request origin is not allowed.');
+  }
+
+  const ip = clientIp(request);
+  if (!consumeRateLimit(`status:${ip}`)) {
+    return send(response, 429, 'Too many status requests. Please try later.', {
+      'Access-Control-Allow-Origin': origin,
+      Vary: 'Origin',
+    });
+  }
+
+  const sessionId = url.searchParams.get('id') || '';
+  if (!/^cs_(?:test_|live_)?[A-Za-z0-9]{20,200}$/.test(sessionId)) {
+    return send(response, 400, 'Invalid Checkout Session ID.', {
+      'Access-Control-Allow-Origin': origin,
+      Vary: 'Origin',
+    });
+  }
+
+  const stripeResponse = await fetch(
+    `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      headers: { Authorization: `Bearer ${config.stripeSecretKey}` },
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  const session = await stripeResponse.json();
+  if (!stripeResponse.ok || session?.metadata?.purpose !== 'donation') {
+    return send(response, 404, 'Checkout Session not found.', {
+      'Access-Control-Allow-Origin': origin,
+      Vary: 'Origin',
+    });
+  }
+
+  response.writeHead(200, {
+    'Access-Control-Allow-Origin': origin,
+    'Cache-Control': 'no-store',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Referrer-Policy': 'no-referrer',
+    Vary: 'Origin',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  response.end(JSON.stringify({
+    paymentStatus: session.payment_status,
+    amountTotal: session.amount_total,
+    currency: session.currency,
+  }));
 };
 
 const handleWebhook = async (request, response) => {
@@ -260,8 +314,13 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || '/', 'http://localhost');
     if (request.method === 'GET' && url.pathname === '/healthz') return send(response, 200, 'ok');
+    if (request.method === 'GET' && url.pathname === '/session-status') {
+      return await handleSessionStatus(request, response, url);
+    }
     if (request.method === 'POST' && url.pathname === '/session') return await handleSession(request, response);
-    if (request.method === 'POST' && url.pathname === '/webhooks/stripe') return await handleWebhook(request, response);
+    if (request.method === 'POST' && url.pathname === '/webhooks/stripe' && config.stripeWebhookSecret) {
+      return await handleWebhook(request, response);
+    }
     send(response, 404, 'Not found.');
   } catch (error) {
     if (error?.message === 'REQUEST_TOO_LARGE') return send(response, 413, 'Request is too large.');

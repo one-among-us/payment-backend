@@ -1,19 +1,20 @@
 # One Among Us payment backend
 
-Small Node.js service behind `donate.oau.app`. It validates donation requests,
-creates one-time Stripe Checkout Sessions, and validates Stripe webhooks. Card
-details never pass through this service.
+Small Node.js service behind `donate.oau.app`. It validates donation requests
+and creates one-time, card-only Stripe Checkout Sessions. Card details never
+pass through this service. Webhook support is optional.
 
 ## Configure
 
 1. Copy `.env.example` to `.env` and replace every secret.
 2. Create a Cloudflare Turnstile widget for `www.oneamongus.ca` and
    `oneamongus.ca` with action `donate`.
-3. In Stripe Workbench, add an event destination pointing to
+3. Optional: in Stripe Workbench, add an event destination pointing to
    `https://donate.oau.app/webhooks/stripe`. Subscribe to
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    and `checkout.session.async_payment_failed`, then put its signing secret in
-   `STRIPE_WEBHOOK_SECRET`.
+   `STRIPE_WEBHOOK_SECRET`. Without this variable, the webhook endpoint remains
+   disabled and the return page checks the Checkout Session directly.
 4. Keep Stripe in test mode until the complete flow and webhook signature
    validation have been tested.
 5. Build the VitePress frontend with its public Turnstile site key set as
@@ -52,7 +53,10 @@ shared limiter such as Redis or enforce the same limits at the reverse proxy.
 
 - `POST /session`: validates a form submission and redirects with HTTP 303 to a
   new Stripe Checkout Session.
-- `POST /webhooks/stripe`: validates and receives Stripe webhook events.
+- `GET /session-status?id=cs_...`: returns only payment status, amount, and
+  currency for a donation Session. It never returns donor details.
+- `POST /webhooks/stripe`: optional; enabled only when
+  `STRIPE_WEBHOOK_SECRET` is configured.
 - `GET /healthz`: health check.
 
 Never commit `.env`, expose `STRIPE_SECRET_KEY`, or accept arbitrary prices from
