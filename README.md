@@ -57,3 +57,27 @@ shared limiter such as Redis or enforce the same limits at the reverse proxy.
 
 Never commit `.env`, expose `STRIPE_SECRET_KEY`, or accept arbitrary prices from
 the browser.
+
+## Nix flake
+
+The repository exports:
+
+- `packages.<system>.default`: the immutable backend source package.
+- `nixosModules.default`: a hardened systemd service with an optional Caddy
+  virtual host.
+
+Example NixOS configuration:
+
+```nix
+{
+  inputs.payment-backend.url = "github:one-among-us/payment-backend";
+  inputs.payment-backend.inputs.nixpkgs.follows = "nixpkgs";
+
+  # Add payment-backend.nixosModules.default to the host's modules, then:
+  services.oau-payment-backend = {
+    enable = true;
+    domain = "donate.oau.app";
+    environmentFile = "/var/lib/secrets/payment-backend.env";
+  };
+}
+```
