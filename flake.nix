@@ -62,12 +62,6 @@
               description = "Port on which the backend listens.";
             };
 
-            domain = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-              example = "donate.oau.app";
-              description = "Optional domain for a Caddy reverse proxy.";
-            };
           };
 
           config = lib.mkIf cfg.enable {
@@ -88,11 +82,10 @@
                 EnvironmentFile = cfg.environmentFile;
                 DynamicUser = true;
                 Restart = "on-failure";
-                RestartSec = "5s";
-                CapabilityBoundingSet = "";
-                LockPersonality = true;
-                MemoryDenyWriteExecute = true;
-                NoNewPrivileges = true;
+              RestartSec = "5s";
+              CapabilityBoundingSet = "";
+              LockPersonality = true;
+              NoNewPrivileges = true;
                 PrivateDevices = true;
                 PrivateTmp = true;
                 ProtectClock = true;
@@ -109,13 +102,6 @@
                 SystemCallArchitectures = "native";
                 UMask = "0077";
               };
-            };
-
-            services.caddy = lib.mkIf (cfg.domain != null) {
-              enable = true;
-              virtualHosts.${cfg.domain}.extraConfig = ''
-                reverse_proxy ${cfg.host}:${toString cfg.port}
-              '';
             };
           };
         };

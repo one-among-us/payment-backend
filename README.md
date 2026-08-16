@@ -67,8 +67,8 @@ the browser.
 The repository exports:
 
 - `packages.<system>.default`: the immutable backend source package.
-- `nixosModules.default`: a hardened systemd service with an optional Caddy
-  virtual host.
+- `nixosModules.default`: a hardened systemd service intended to sit behind a
+  reverse proxy.
 
 Example NixOS configuration:
 
@@ -80,7 +80,6 @@ Example NixOS configuration:
   # Add payment-backend.nixosModules.default to the host's modules, then:
   services.oau-payment-backend = {
     enable = true;
-    domain = "donate.oau.app";
     environmentFile = "/var/lib/secrets/payment-backend.env";
   };
 }
